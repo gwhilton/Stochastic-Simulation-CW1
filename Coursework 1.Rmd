@@ -1,0 +1,235 @@
+---
+title: "Coursework 1 2020"
+author: "George Hilton"
+date: "30/11/2020"
+output:
+  html_notebook: default
+  html_document:
+    df_print: paged
+  df_print: paged
+  pdf_document: default  
+---
+
+
+Using the optimize function to efficiently calculate M as well as the paramaters a and b for the beta distribution.
+
+```{r}
+
+```
+
+```{r include=FALSE}
+library(ggplot2, microbenchmark)
+```
+
+Optimisation to find M, a, b. Construct f*, and f*/g
+
+```{r include=FALSE}
+foverg <- function(x, a, b){
+  ((1/(x*(1-x)))*exp((-1/9)*(0.3+log(x/(1-x)))^2))/((x^(a-1)*(1-x)^(b-1)*factorial(a+b-1))/(factorial(a-1)*factorial(b-1)))
+}
+
+optimiseM <- function(params){
+  optimize(foverg, a = params[1], b=params[2], lower=0, upper=1, maximum=TRUE)$objective}
+
+results <- optim(par = c(0.7, 0.8),optimiseM, lower = 0, upper = Inf, method = "L-BFGS-B")
+
+a <- results$par[1]
+b <- results$par[2]
+M <- results$value
+
+fovergP <- function(x){
+  ((1/(x*(1-x)))*exp((-1/9)*(0.3+log(x/(1-x)))^2))/((x^(a-1)*(1-x)^(b-1)*factorial(a+b-1))/(factorial(a-1)*factorial(b-1)))
+}
+
+
+fstar <- function(x){
+  (1/(x*(1-x)))*exp((-1/9)*(0.3+log(x/(1-x)))^2)
+}
+
+g <- function(x){
+  (x^(a-1)*(1-x)^(b-1)*factorial(a+b-1))/(factorial(a-1)*factorial(b-1))
+}
+```
+
+plot1, plotting of f* and mg
+
+```{r}
+knitr::opts_chunk$set(echo=FALSE)
+plot1 <- function(){
+  x=seq(0.1,0.99,l=100)
+df = data.frame(x=x, pdf1=fstar(x), pdf2=M*g(x))
+mylabels=list(expression(f[X](x)),expression(Mg[Y](x)))
+
+#plotting the graph of the pdf and its envelope function
+p <- ggplot(df)
+p + geom_line(aes(x,pdf1,colour="pdf1"))+
+  geom_line(aes(x,pdf2,colour="pdf2"))+ 
+  labs(y="Density", title=expression("Comparison of "~f[X](x)~"and "~Mg[X](x)))+
+  scale_colour_manual("", values=c("pdf1"="#CC3333","pdf2"="#3399CC"), labels=mylabels)
+}
+
+plot1()
+```
+
+construction of wl and wu
+
+```{r}
+knitr::opts_chunk$set(echo=FALSE)
+sbox <- function(){
+  # finding a value for the top of my rectangle. i will use the minimum of the dip 
+top = optimize(fovergP, lower=0.25, upper=0.75, maximum=FALSE)$objective
+# finding the left and right values for my rectangle
+transformDown <- function(x, transform){fovergP(x)-transform}
+# 0.01 is a reasonable lower bound as i checked fovergP(0.01) < top
+leftVal = uniroot(transformDown, transform=top, lower=0.01, upper=0.5)$root
+# 0.99 also reasonable upper bound as fovergP(0.99) < top
+rightVal = uniroot(transformDown, transform=top, lower=0.5, upper=0.99)$root
+return(c(top, leftVal, rightVal))
+}
+
+bbox <- function(){
+  # finding a value for the top of my rectangle. i will use the minimum of the dip 
+top = optimize(fovergP, lower=0, upper=1, maximum=TRUE)$objective
+return(top)
+}
+
+svals = sbox()
+bval = bbox()
+
+wl <- function(y){ifelse(svals[2] < y & y < svals[3], svals[1], 0)}
+wu <- function(y){ifelse(0 < y & y < 1, bval)}
+
+```
+
+plot of wl, wu and f/g
+
+```{r}
+knitr::opts_chunk$set(echo=FALSE)
+plot2 <- function(){
+  x=seq(0.0000001,0.9999999,l=100)
+  df2 = data.frame(x=x, pdf1=fovergP(x), pdf2=wl(x), pdf3=wu(x))
+  mylabels=list(expression(f/g[X](x)), expression(W_L(x)), expression(Wu(x)))
+
+  p <- ggplot(df2)
+  p + geom_line(aes(x,pdf1,colour="pdf1"))+
+  geom_line(aes(x,pdf2,colour='pdf2'))+
+  geom_line(aes(x,pdf3,colour='pdf3'))+
+  labs(y="Density", title=expression("Plot of "~f/g[X](x)~"and"~W_L(x)))+
+  scale_colour_manual("", values=c("pdf1"="#CC3333", "pdf2"="#3399CC", 'pdf3'='#336600'), labels=mylabels)
+}
+
+plot2()
+```
+integrals to compute normalising constant, and theoretical acceptance probability
+```{r}
+integrand1 <- function(x){ #theoretical acceptance probability
+ ((1/(x*(1-x)))*exp((-1/9)*(0.3+log(x/(1-x)))^2))/M
+}
+
+integrand2 <- function(x){ #theoretical acceptance probability
+ ((1/(x*(1-x)))*exp((-1/9)*(0.3+log(x/(1-x)))^2))
+}
+
+theta = integrate(integrand1, lower=0, upper=1)
+theta = theta$value
+N = integrate(integrand2, lower=0, upper=1)
+N = N$value
+f <- function(x){
+  1/N * (1/(x*(1-x)))*exp((-1/9)*(0.3+log(x/(1-x)))^2)
+}
+
+```
+
+generating samples using squeeze and without
+
+```{r}
+
+rdsSQUEEZE <- function(n){ #the function which generates the sample
+  x <- vector("numeric") #vector to keep track of simulated values 
+  count <- 0
+  total <- 0
+  while(count<n){
+    ngen = ceiling(1/theta * (n-count))
+    u <- runif(ngen) #generate u, uniformly, for accept/reject
+    v <- runif(ngen) #generate v, uniformly, for use in the envelope function
+    y <- qbeta(v, a, b) #generate Exp(1) using inversion
+    out <- ifelse(M*u <= wl(y), T, ifelse(M*u > wu(y), F, ifelse(u > fovergP(y)/M, F, T))) 
+    x <- c(x, y[out]) #accept X=y if u <= f(y)/Mg(y)
+    count <- length(x) #the next two lines are used to keep track of the test and acceptance
+    total <- total + ngen
+ }
+ predictedp = format(theta) #theoretical acceptance probability
+ actualp = format(count/total) #actual acceptance probability
+ return(list(x=x, 'Predicted Acceptance Probability'=predictedp, 'Actual Acceptance Probability'=actualp))
+}
+
+
+rds <- function(n){ #the function which generates the sample
+  x <- vector("numeric") #vector to keep track of simulated values 
+  count <- 0
+  total <- 0
+  while(count<n){
+    ngen = ceiling(1/theta * (n-count))
+    u <- runif(ngen) #generate u, uniformly, for accept/reject
+    v <- runif(ngen) #generate v, uniformly, for use in the envelope function
+    y <- qbeta(v, a, b) #generate Exp(1) using inversion
+    x <- c(x, y[u <= fovergP(y)/M]) #accept X=y if u <= f(y)/Mg(y)
+    count <- length(x) #the next two lines are used to keep track of the test and acceptance
+    total <- total + ngen
+ }
+ predictedp = format(theta) #theoretical acceptance probability
+ actualp = format(count/total) #actual acceptance probability
+ return(list(x=x, 'Predicted Acceptance Probability'=predictedp, 'Actual Acceptance Probability'=actualp))
+}
+
+```
+
+benchmarking
+
+```{r}
+
+benchmark <- function(n, t){
+  results <- microbenchmark(rdsSQUEEZE(n), rds(n), times = t)
+  return(results)
+}
+
+benchmark(100000,1)
+
+
+```
+
+
+plot of f against data (need to add for both rds funcs)
+
+```{r}
+plot3 <-function(){
+  n = 1000 #sample size
+  x = rds(n)$x #ensuring we'll have numeric data
+  df1 = data.frame(x, pdf=f(x))
+  df2 = data.frame(x)
+  mylabels=list(expression(f[X](x)))
+  #plotting the graph
+  p <- ggplot(df1)
+  p + geom_histogram(aes(x,y= ..density..), breaks=seq(0, 1,l=100))+
+  geom_line(aes(x,pdf,colour="pdf"))+ 
+  labs(y="density", title=expression("Comparison of Histogram and "~f[X](x)))+
+  scale_colour_manual("", values=c("pdf"="red"), labels=mylabels)
+}
+
+plot3()
+
+```
+
+diagnostic plots
+
+```{r}
+
+
+
+
+
+
+
+
+
+```
